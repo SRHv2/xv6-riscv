@@ -64,6 +64,7 @@ OBJDUMP = $(TOOLPREFIX)objdump
 DETFLAGS = -ffile-prefix-map=$(CURDIR)=.
 
 CFLAGS = -Wall -Werror -Wno-unknown-attributes -O -fno-omit-frame-pointer -ggdb -gdwarf-2
+CFLAGS += -DLAB_SYSCALL        # syscall lab: omit the 3 page-clearing memsets (attack xv6)
 CFLAGS += $(DETFLAGS)
 CFLAGS += -march=rv64gc
 CFLAGS += -std=gnu99
@@ -145,6 +146,10 @@ UPROGS=\
 	$U/_sixfive\
 	$U/_memdump\
 	$U/_find\
+	$U/_sandbox\
+	$U/_sbtest\
+	$U/_secret\
+	$U/_attack\
 	$U/_stressfs\
 	$U/_usertests\
 	$U/_grind\

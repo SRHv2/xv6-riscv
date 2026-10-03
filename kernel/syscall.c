@@ -103,6 +103,7 @@ extern uint64 sys_link(void);
 extern uint64 sys_mkdir(void);
 extern uint64 sys_close(void);
 extern uint64 sys_sync(void);
+extern uint64 sys_interpose(void);
 
 // An array mapping syscall numbers from syscall.h
 // to the function that handles the system call.
@@ -130,8 +131,27 @@ static uint64 (*syscalls[])(void) = {
   [SYS_mkdir]   = sys_mkdir,
   [SYS_close]   = sys_close,
   [SYS_sync]    = sys_sync,
+  [SYS_interpose] = sys_interpose,
   // clang-format on
 };
+
+// Sandbox check: a masked system call is normally rejected, but a masked
+// open or exec is permitted when its pathname argument (argument 0) matches
+// the allowed pathname recorded by interpose().  Returns 1 if the call
+// should be allowed to proceed, 0 if it must be rejected.
+static int
+sandbox_allows(struct proc *p, int num)
+{
+  char path[MAXPATH];
+
+  if (num != SYS_open && num != SYS_exec)
+    return 0;                        // only open/exec can be path-exempted
+  if (p->spath[0] == '\0')
+    return 0;                        // no allowed path configured
+  if (argstr(0, path, MAXPATH) < 0)
+    return 0;                        // couldn't read the path argument
+  return strncmp(path, p->spath, MAXPATH) == 0;
+}
 
 void
 syscall(void)
@@ -141,6 +161,12 @@ syscall(void)
 
   num = p->trapframe->a7;
   if (num > 0 && num < NELEM(syscalls) && syscalls[num]) {
+    // Sandbox (interpose): reject this call if its bit is set in the mask,
+    // unless it is a path-based call whose path is the allowed one.
+    if ((p->smask & (1 << num)) != 0 && !sandbox_allows(p, num)) {
+      p->trapframe->a0 = -1;
+      return;
+    }
     // Use num to lookup the system call function for num, call it,
     // and store its return value in p->trapframe->a0
     p->trapframe->a0 = syscalls[num]();

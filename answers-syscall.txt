@@ -1,0 +1,41 @@
+CS311 A02 - xv6 syscall lab - "Using gdb" answers
+==================================================
+
+Q1. Looking at the backtrace, which function called syscall()?
+    usertrap()  (kernel/trap.c:68).  The backtrace was:
+      #0 syscall ()  at kernel/syscall.c
+      #1 usertrap () at kernel/trap.c:68
+
+Q2. What is the value of p->trapframe->a7 and what does it represent?
+    a7 = 0xf (15).  a7 holds the system-call number, which tells the kernel
+    which system call the user program is requesting.  15 is SYS_open
+    (see kernel/syscall.h): it is init's first system call,
+    open("console", O_RDWR) in user/init.c:19 (visible as the ecall in
+    user/init.asm).
+
+Q3. (gdb) p /x $sstatus  -> 0x200000022
+    What was the previous mode the CPU was in?
+    User mode.  The previous privilege is given by the SPP bit (bit 8) of
+    sstatus; here bit 8 is 0, which means the CPU was in user mode before it
+    trapped into the kernel.
+
+Q4. With "num = *(int *)0;" at the start of syscall(), the kernel panics.
+    Panic line printed: scause=0xd sepc=0x80002760 stval=0x0 ; panic: kerneltrap
+
+    The faulting assembly instruction (found at sepc 0x80002760 in
+    kernel/kernel.asm) is:
+        80002760:  00002683   lw   a3,0(zero)
+    This loads a word from address 0.  The variable num corresponds to
+    register a3.
+
+Q5. Why does the kernel crash?
+    The instruction "lw a3,0(zero)" dereferences virtual address 0.
+    Address 0 is not mapped in the kernel's address space (see figure 3-3 in
+    the xv6 book), so the load raises a page fault.  scause = 0xd (13) is
+    "Load page fault", and stval = 0x0 confirms the faulting address is 0.
+    An unexpected fault while in the kernel is caught by kerneltrap(), which
+    panics.
+
+Q6. What is the name and pid of the process that was running when the kernel
+    panicked?
+    name = "init", pid = 1.

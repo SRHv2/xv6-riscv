@@ -110,3 +110,30 @@ sys_uptime(void)
   release(&tickslock);
   return xticks;
 }
+
+// Restrict the calling process: reject the system calls whose bit is set
+// in `mask`, except that a masked open/exec is still allowed when its
+// pathname matches `path`.  The restrictions are inherited across fork.
+uint64
+sys_interpose(void)
+{
+  int mask;
+  struct proc *p = myproc();
+
+  argint(0, &mask);
+
+  // Only ever ADD restrictions: a sandboxed process must not be able to
+  // escape by clearing mask bits with a later interpose() call.
+  p->smask |= mask;
+
+  // The second argument is the allowed pathname ("-" means none).  Record it
+  // only the first time (when none is set yet); a sandboxed process must not
+  // be able to widen its allowed path.  sbtest may pass a null pointer, which
+  // argstr reports as an error; leave the path unset in that case.
+  if (p->spath[0] == '\0') {
+    if (argstr(1, p->spath, MAXPATH) < 0)
+      p->spath[0] = '\0';
+  }
+
+  return 0;
+}
