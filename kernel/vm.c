@@ -7,7 +7,6 @@
 #include "spinlock.h"
 #include "proc.h"
 #include "fs.h"
-
 /*
  * the kernel's page table.
  */
@@ -148,22 +147,137 @@ walkaddr(pagetable_t pagetable, uint64 va)
 
 
 #if defined(LAB_PGTBL) || defined(SOL_MMAP) || defined(SOL_COW)
+
+void
+vmprint_recursive(pagetable_t pagetable, int level, uint64 va_prefix)
+{
+  for (int i = 0; i < 512; i++) {
+    pte_t pte = pagetable[i];
+
+    if (pte & PTE_V) {
+      uint64 va = va_prefix | ((uint64)i << PXSHIFT(level));
+
+      for (int j = 0; j < 3 - level; j++)
+        printk(" ..");
+
+      // Print the virtual address represented by this entry.
+      printk("%p: pte %p pa %p",
+             (void *)va, (void *)pte, (void *)PTE2PA(pte));
+
+      // Print permissions for leaf entries.
+      if (PTE_LEAF(pte)) {
+        printk(" perm ");
+
+        if (pte & PTE_R)
+          printk("R");
+        if (pte & PTE_W)
+          printk("W");
+        if (pte & PTE_X)
+          printk("X");
+        if (pte & PTE_U)
+          printk("U");
+      }
+
+      printk("\n");
+
+      // Continue into child page tables only for non-leaf entries.
+      if (level > 0 && !PTE_LEAF(pte)) {
+        vmprint_recursive((pagetable_t)PTE2PA(pte),
+                          level - 1, va);
+      }
+    }
+  }
+}
+
 void
 vmprint(pagetable_t pagetable)
 {
-  // your code here
+  printk("page table %p\n", (void *)pagetable);
+  vmprint_recursive(pagetable, 2, 0);
 }
 #endif
 
+// Create a 2 MB superpage mapping in the kernel page table.
+static int
+supermappages(pagetable_t pagetable, uint64 va, uint64 pa, int perm)
+{
+  pte_t *pte;
+  pagetable_t next;
 
+  if (va % SUPERPGSIZE != 0 || pa % SUPERPGSIZE != 0)
+    panic("supermappages: not aligned");
+
+  if (va >= MAXVA)
+    panic("supermappages: va");
+
+  // Get the level-2 entry.
+  pte = &pagetable[PX(2, va)];
+
+  if (*pte & PTE_V) {
+    if (PTE_LEAF(*pte))
+      panic("supermappages: remap");
+
+    next = (pagetable_t)PTE2PA(*pte);
+  } else {
+    next = (pagetable_t)kalloc();
+    if (next == 0)
+      return -1;
+
+    memset(next, 0, PGSIZE);
+    *pte = PA2PTE(next) | PTE_V;
+  }
+
+  // Get the level-1 entry.
+  pte = &next[PX(1, va)];
+
+  if (*pte & PTE_V)
+    panic("supermappages: remap");
+
+  // A level-1 leaf maps an entire 2 MB region.
+  *pte = PA2PTE(pa) | perm | PTE_V;
+
+  return 0;
+}
 // add a mapping to the kernel page table.
 // only used when booting.
 // does not flush TLB or enable paging.
 void
 kvmmap(pagetable_t kpgtbl, uint64 va, uint64 pa, uint64 sz, int perm)
 {
-  if (mappages(kpgtbl, va, sz, pa, perm) != 0)
-    panic("kvmmap");
+  uint64 chunk;
+
+  if (va % PGSIZE || pa % PGSIZE || sz % PGSIZE)
+    panic("kvmmap: not aligned");
+
+  while (sz > 0) {
+
+    // Use a superpage if both addresses are aligned
+    // and at least 2 MB remain.
+    if (va % SUPERPGSIZE == 0 &&
+        pa % SUPERPGSIZE == 0 &&
+        sz >= SUPERPGSIZE) {
+
+      if (supermappages(kpgtbl, va, pa, perm) != 0)
+        panic("kvmmap: superpage");
+
+      chunk = SUPERPGSIZE;
+
+    } else {
+
+      // Otherwise, use ordinary 4 KB mappings.
+      chunk = SUPERPGSIZE - (va % SUPERPGSIZE);
+
+      if (chunk > sz)
+        chunk = sz;
+
+      if (mappages(kpgtbl, va, chunk, pa, perm) != 0)
+        panic("kvmmap");
+    }
+
+    va += chunk;
+    pa += chunk;
+    sz -= chunk;
+  }
 }
 
 // Create PTEs for virtual addresses starting at va that refer to

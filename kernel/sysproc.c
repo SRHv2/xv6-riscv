@@ -110,7 +110,58 @@ sys_vmprint(void)
 int
 sys_pgaccess(void)
 {
-  // lab pgtbl: your code here.
+  uint64 start;
+  uint64 addr;
+  uint64 dest;
+  int npage;
+
+  struct proc *p = myproc();
+
+  // Get the system call arguments.
+  argaddr(0, &start);
+  argint(1, &npage);
+  argaddr(2, &dest);
+
+  // Validate the number of pages.
+  if (npage < 1 || npage > 256)
+    return -1;
+
+  // Temporary buffer: 256 pages = 32 bytes.
+  char accessbits[32];
+  memset(accessbits, 0, sizeof(accessbits));
+
+  // Examine each requested page.
+  for (int i = 0; i < npage; i++) {
+
+    addr = start + (uint64)i * PGSIZE;
+
+    // Check for address overflow or invalid virtual address.
+    if (addr < start || addr >= MAXVA)
+      return -1;
+
+    // Find the page-table entry.
+    pte_t *pte = walk(p->pagetable, addr, 0);
+
+    // Ensure that the page is mapped and user-accessible.
+    if (pte == 0 || (*pte & PTE_V) == 0 || (*pte & PTE_U) == 0)
+      return -1;
+
+    // Check whether the page has been accessed.
+    if (*pte & PTE_A) {
+
+      // Set the corresponding bit in our result.
+      accessbits[i / 8] |= (1 << (i % 8));
+
+      // Clear the accessed bit for future tracking.
+      *pte &= ~PTE_A;
+    }
+  }
+
+  // Copy the result back to the user's address space.
+  if (copyout(p->pagetable, p->sz, dest,
+              accessbits, (npage + 7) / 8) < 0)
+    return -1;
+
   return 0;
 }
 #endif

@@ -1,0 +1,63 @@
+1. Explanation of print_pgtbl output
+
+A page table entry (PTE) stores the physical page number associated with a virtual page, together with permission and status bits. The physical addresses shown in the output are not necessarily consecutive because xv6 allocates physical pages independently.
+
+The permission bits are:
+- V: Valid mapping.
+- R: Read permission.
+- W: Write permission.
+- X: Execute permission.
+- U: User-mode access permission.
+- A: Accessed bit, set when the page is accessed.
+- D: Dirty bit, set when the page is written.
+
+In my pgtbltest output:
+
+- Virtual address 0x0 has permissions RXU. It represents the process's executable code, which can be read and executed by user mode but not written.
+- Virtual address 0x1000 has permissions RWU. It represents writable user memory, such as the data section.
+- Virtual address 0x2000 has permissions RW but does not have U. It is the guard page below the user stack. Although it has read and write bits, user-mode code cannot access it because the user permission bit is disabled.
+- Virtual address 0x3000 has permissions RWU, with the accessed and dirty bits set. It represents the user stack, which can be read and written by the process.
+
+The special pages near the top of the virtual address space are:
+
+- 0x3FFFFFD000 is the USYSCALL page. Its permissions are RU, so user programs can read the stored process ID but cannot modify it.
+- 0x3FFFFFE000 is the trapframe page. It has read and write permissions but no user permission, so it is accessible only to the kernel.
+- 0x3FFFFFF000 is the trampoline page. It has read and execute permissions but no user permission. It contains the code used when switching between user mode and kernel mode.
+
+The PTE values also contain status bits such as A and D. These bits are maintained by the hardware and help the kernel track memory accesses and modifications.
+
+
+2. Explanation of vmprint output
+
+The vmprint function displays the hierarchical structure of a process's page table. RISC-V Sv39 uses three levels of page tables: level 2, level 1, and level 0.
+
+Entries that are valid but do not contain R, W, or X permissions are intermediate page-table entries. They point to another page-table page rather than directly mapping memory.
+
+Leaf entries contain the actual mappings between virtual and physical memory. In the vmprint output, the indentation represents the page-table depth:
+
+- One indentation level represents a level-2 entry.
+- Two indentation levels represent a level-1 entry.
+- Three indentation levels represent a level-0 entry.
+
+The leaf entries at virtual addresses 0x0, 0x1000, 0x2000, and 0x3000 represent the same code, data, guard, and stack pages described in the print_pgtbl output.
+
+The high virtual addresses contain the special mappings:
+
+- USYSCALL provides read-only access to the process ID from user mode.
+- TRAPFRAME stores the process's saved register state and is accessible only to the kernel.
+- TRAMPOLINE contains the code used for transitions between user and kernel mode.
+
+The physical addresses shown by vmprint correspond to those in print_pgtbl for the same virtual pages. The two outputs present the same mappings in different ways: print_pgtbl examines individual virtual pages, while vmprint displays the page-table hierarchy that describes those mappings.
+
+The important distinction is that intermediate entries point to lower-level page tables, whereas leaf entries map virtual addresses to physical memory.
+
+
+3. Other system calls that could benefit from the shared page
+
+The uptime system call is another possible candidate for optimization. It returns the number of timer ticks since the system started. The kernel could maintain an updated tick counter in a shared read-only page that user processes can access directly.
+
+A user program could then read the counter without making a system call, avoiding the overhead of switching from user mode to kernel mode.
+
+Another possible example is getppid(), if such a system call were added to xv6. The kernel could maintain the parent process ID in the shared page for each process, allowing the process to read it without entering the kernel. The kernel would need to update this value appropriately when process relationships change.
+
+These optimizations are useful for frequently requested information that can safely be exposed to user space without allowing user programs to modify kernel-managed data.
